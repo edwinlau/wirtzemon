@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from supabase import create_client, Client
 from datetime import datetime
+import time
 
 # Page setup
 st.set_page_config(page_title="FPL Analytics", page_icon="⚽", layout="wide")
@@ -21,43 +22,27 @@ def init_supabase():
 supabase = init_supabase()
 
 # Title
-st.title("⚽ FPL Analytics Dashboard - DEBUG MODE")
+st.title("⚽ FPL Analytics Hub")
 st.markdown("**Live Fantasy Premier League Data with Database Storage**")
 
 # Show database connection status
 if supabase:
     st.success("✅ Connected to Wirtzemon Database")
+    
+    # Show current database count
+    try:
+        db_count = supabase.table('players').select('id').execute()
+        st.info(f"📊 Current players in database: {len(db_count.data)}")
+    except:
+        st.info("📊 Checking database...")
 else:
     st.error("❌ Database connection failed")
     st.stop()
 
-# Test database connection
-def test_database():
-    """Test basic database operations"""
-    st.subheader("🔍 Database Connection Test")
-    
-    try:
-        # Test simple query
-        result = supabase.table('players').select('id').limit(1).execute()
-        st.success(f"✅ Database query successful. Current records: {len(result.data)}")
-        return True
-    except Exception as e:
-        st.error(f"❌ Database query failed: {str(e)}")
-        st.write("**Full error details:**")
-        st.code(str(e))
-        return False
-
-# Run database test
-db_test_passed = test_database()
-
-if not db_test_passed:
-    st.error("Database test failed. Cannot proceed with data storage.")
-    st.info("Please check your Supabase table structure and permissions.")
-
-# Simple data fetch (without storage first)
+# Fetch FPL data
 @st.cache_data(ttl=1800)
-def fetch_fpl_data_only():
-    """Just fetch FPL data without storing"""
+def fetch_fpl_data():
+    """Fetch FPL data from official API"""
     try:
         url = "https://fantasy.premierleague.com/api/bootstrap-static/"
         response = requests.get(url)
@@ -83,50 +68,67 @@ def fetch_fpl_data_only():
         st.error(f"Error fetching FPL data: {e}")
         return None
 
-# Manual database storage test
-def store_single_player_test():
-    """Test storing just one player"""
-    st.subheader("🧪 Single Player Storage Test")
+# Store all players function
+def store_all_players(df):
+    """Store all FPL players in database with progress tracking"""
     
-    if st.button("Test Store One Player"):
-        try:
-            # Create a simple test record
-            test_player = {
-                'id': 1,
-                'web_name': 'Test Player',
-                'position': 'MID',
-                'team_name': 'Test Team',
-                'now_cost': 50,
-                'total_points': 100,
-                'points_per_game': 5.0,
-                'selected_by_percent': 10.5,
-                'form': 3.0,
-                'minutes': 900,
-                'goals_scored': 5,
-                'assists': 3,
-                'clean_sheets': 0,
+    if df is None or len(df) == 0:
+        st.error("No data to store")
+        return False
+    
+    # Create progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        # Prepare all player data
+        players_data = []
+        total_players = len(df)
+        
+        status_text.text("Preparing player data...")
+        
+        for i, (_, row) in enumerate(df.iterrows()):
+            player_data = {
+                'id': int(row['id']),
+                'web_name': str(row['web_name']),
+                'position': str(row['position']),
+                'team_name': str(row['team_name']),
+                'now_cost': int(row['now_cost']),
+                'total_points': int(row['total_points']),
+                'points_per_game': float(row['points_per_game']) if pd.notna(row['points_per_game']) else 0.0,
+                'selected_by_percent': float(row['selected_by_percent']),
+                'form': float(row['form']) if pd.notna(row['form']) else 0.0,
+                'minutes': int(row['minutes']),
+                'goals_scored': int(row['goals_scored']),
+                'assists': int(row['assists']),
+                'clean_sheets': int(row['clean_sheets']),
                 'updated_at': datetime.now().isoformat()
             }
+            players_data.append(player_data)
             
-            st.write("**Attempting to store:**")
-            st.json(test_player)
-            
-            # Try to insert
-            result = supabase.table('players').upsert([test_player]).execute()
-            
-            st.success("✅ Single player stored successfully!")
-            st.write("**Database response:**")
-            st.json(result.data if hasattr(result, 'data') else str(result))
-            
-        except Exception as e:
-            st.error(f"❌ Single player storage failed: {str(e)}")
-            st.write("**Full error details:**")
-            st.code(str(e))
+            # Update progress
+            progress = (i + 1) / total_players
+            progress_bar.progress(progress)
+            status_text.text(f"Preparing player {i+1}/{total_players}: {row['web_name']}")
+        
+        # Store in database
+        status_text.text("Storing in database...")
+        result = supabase.table('players').upsert(players_data).execute()
+        
+        progress_bar.progress(1.0)
+        status_text.text("✅ Complete!")
+        
+        st.success(f"🎉 Successfully stored {len(players_data)} players in database!")
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ Error storing players: {str(e)}")
+        status_text.text("❌ Storage failed")
+        return False
 
 # Load FPL data
-st.subheader("📡 FPL Data")
 with st.spinner("Loading FPL data..."):
-    df = fetch_fpl_data_only()
+    df = fetch_fpl_data()
 
 if df is None:
     st.error("Could not load FPL data")
@@ -134,92 +136,82 @@ if df is None:
 
 st.success(f"✅ Loaded {len(df)} players from FPL API")
 
-# Show sample data
-st.subheader("📊 Sample FPL Data")
-st.write("**First 3 players:**")
-sample_data = df.head(3)[['id', 'web_name', 'position', 'team_name', 'price', 'total_points']]
-st.dataframe(sample_data)
+# Database Management Section
+st.subheader("🗄️ Database Management")
 
-# Manual storage test
-store_single_player_test()
+col1, col2, col3 = st.columns(3)
 
-# Batch storage test
-def store_batch_test():
-    """Test storing multiple players"""
-    st.subheader("📦 Batch Storage Test")
-    
-    if st.button("Test Store 5 Players"):
+with col1:
+    if st.button("📥 Store ALL Players in Database", type="primary"):
+        st.write("**Storing all FPL players in database...**")
+        success = store_all_players(df)
+        
+        if success:
+            # Refresh database count
+            try:
+                db_count = supabase.table('players').select('id').execute()
+                st.balloons()
+                st.success(f"🎉 Database now contains {len(db_count.data)} players!")
+            except:
+                st.success("🎉 All players stored successfully!")
+
+with col2:
+    if st.button("🔍 Check Database Count"):
         try:
-            # Take first 5 players
-            test_players = []
-            for i in range(5):
-                row = df.iloc[i]
-                player_data = {
-                    'id': int(row['id']),
-                    'web_name': str(row['web_name']),
-                    'position': str(row['position']),
-                    'team_name': str(row['team_name']),
-                    'now_cost': int(row['now_cost']),
-                    'total_points': int(row['total_points']),
-                    'points_per_game': float(row['points_per_game']) if pd.notna(row['points_per_game']) else 0.0,
-                    'selected_by_percent': float(row['selected_by_percent']),
-                    'form': float(row['form']) if pd.notna(row['form']) else 0.0,
-                    'minutes': int(row['minutes']),
-                    'goals_scored': int(row['goals_scored']),
-                    'assists': int(row['assists']),
-                    'clean_sheets': int(row['clean_sheets']),
-                    'updated_at': datetime.now().isoformat()
-                }
-                test_players.append(player_data)
-            
-            st.write("**Attempting to store 5 players:**")
-            st.json(test_players[0])  # Show first player as example
-            st.write("... and 4 more players")
-            
-            # Try batch insert
-            result = supabase.table('players').upsert(test_players).execute()
-            
-            st.success("✅ Batch storage successful!")
-            st.write(f"**Stored {len(test_players)} players**")
-            
-            # Check database
             db_count = supabase.table('players').select('id').execute()
-            st.info(f"📊 Total players now in database: {len(db_count.data)}")
-            
+            st.metric("Database Records", len(db_count.data))
         except Exception as e:
-            st.error(f"❌ Batch storage failed: {str(e)}")
-            st.write("**Full error details:**")
-            st.code(str(e))
+            st.error(f"Error checking database: {e}")
 
-store_batch_test()
+with col3:
+    if st.button("🧹 Clear Database"):
+        if st.checkbox("I'm sure I want to delete all players"):
+            try:
+                supabase.table('players').delete().neq('id', 0).execute()
+                st.success("✅ Database cleared")
+            except Exception as e:
+                st.error(f"Error clearing database: {e}")
 
-# Database inspection
-st.subheader("🔍 Database Inspection")
+# Show sample of database contents
+st.subheader("📊 Current Database Contents")
+try:
+    db_sample = supabase.table('players').select('*').limit(10).execute()
+    if db_sample.data:
+        st.dataframe(pd.DataFrame(db_sample.data))
+    else:
+        st.info("Database is empty. Click 'Store ALL Players' to populate it.")
+except Exception as e:
+    st.error(f"Could not load database sample: {e}")
 
-if st.button("Show Database Contents"):
-    try:
-        result = supabase.table('players').select('*').limit(10).execute()
-        if result.data:
-            st.success(f"✅ Found {len(result.data)} players in database")
-            st.dataframe(pd.DataFrame(result.data))
-        else:
-            st.warning("⚠️ Database is empty")
-    except Exception as e:
-        st.error(f"❌ Could not read database: {str(e)}")
+# Regular dashboard
+st.subheader("🏆 Top Performers (Live FPL Data)")
 
-# Clear database button
-st.subheader("🧹 Database Management")
-if st.button("Clear All Players (Reset Database)"):
-    try:
-        result = supabase.table('players').delete().neq('id', 0).execute()
-        st.success("✅ Database cleared")
-    except Exception as e:
-        st.error(f"❌ Could not clear database: {str(e)}")
+# Sidebar filters
+st.sidebar.header("🔍 Filters")
+position_filter = st.sidebar.selectbox("Position:", ["All"] + list(df['position'].unique()))
 
-# Show basic dashboard
-st.subheader("🏆 Top Players (from API)")
-top_players = df.nlargest(10, 'total_points')[
-    ['web_name', 'team_name', 'position', 'price', 'total_points']
+# Apply filter
+filtered_df = df.copy()
+if position_filter != "All":
+    filtered_df = filtered_df[filtered_df['position'] == position_filter]
+
+# Key stats
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric("Players Shown", len(filtered_df))
+
+with col2:
+    avg_price = filtered_df['price'].mean()
+    st.metric("Average Price", f"£{avg_price:.1f}m")
+
+with col3:
+    top_scorer = filtered_df.loc[filtered_df['total_points'].idxmax()]
+    st.metric("Top Scorer", top_scorer['web_name'], f"{top_scorer['total_points']} pts")
+
+# Top players table
+top_players = filtered_df.nlargest(20, 'total_points')[
+    ['web_name', 'team_name', 'position', 'price', 'total_points', 'points_per_game']
 ]
 
 st.dataframe(
@@ -228,9 +220,60 @@ st.dataframe(
         'web_name': 'Player',
         'team_name': 'Team', 
         'position': 'Position',
-        'price': 'Price (£m)',
-        'total_points': 'Total Points'
+        'price': st.column_config.NumberColumn('Price', format="£%.1f"),
+        'total_points': 'Total Points',
+        'points_per_game': st.column_config.NumberColumn('PPG', format="%.1f")
     },
     hide_index=True,
     use_container_width=True
 )
+
+# Value analysis
+st.subheader("💰 Best Value Players")
+filtered_df['value'] = filtered_df['total_points'] / filtered_df['price']
+best_value = filtered_df.nlargest(15, 'value')[
+    ['web_name', 'team_name', 'position', 'price', 'total_points', 'value']
+]
+
+st.dataframe(
+    best_value,
+    column_config={
+        'web_name': 'Player',
+        'team_name': 'Team',
+        'position': 'Position', 
+        'price': st.column_config.NumberColumn('Price', format="£%.1f"),
+        'total_points': 'Total Points',
+        'value': st.column_config.NumberColumn('Value', format="%.2f")
+    },
+    hide_index=True,
+    use_container_width=True
+)
+
+# Team lookup
+st.subheader("🔍 Team Lookup")
+manager_id = st.number_input("Enter FPL Manager ID:", min_value=1, value=1)
+
+if st.button("Look Up Team") and manager_id > 1:
+    try:
+        team_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/"
+        response = requests.get(team_url)
+        
+        if response.status_code == 200:
+            team_data = response.json()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Team Name", team_data['name'])
+            with col2:
+                st.metric("Total Points", f"{team_data['summary_overall_points']:,}")
+            with col3:
+                st.metric("Overall Rank", f"{team_data['summary_overall_rank']:,}")
+        else:
+            st.error("Team not found. Check your Manager ID.")
+    
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+# Footer
+st.markdown("---")
+st.markdown("🔄 Live FPL data | 💾 Stored in Wirtzemon Database | 📊 Built with Streamlit")
