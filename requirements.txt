@@ -3,4 +3,6 @@ pandas
 plotly
 requests
 supabase
-python-dateutil
+beautifulsoup4
+lxml
+numpy
