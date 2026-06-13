@@ -228,7 +228,85 @@ class FPLDataUpdater:
             raise
         
         return stored_changes + stored_price_changes
-    
+
+    def update_gw_history(self, player_ids, season="2025-26"):
+        """Fetch per-player GW history from the FPL element-summary endpoint
+        and upsert current-season rows into players_gw_history."""
+        ELEMENT_SUMMARY_URL = "https://fantasy.premierleague.com/api/element-summary/{player_id}/"
+        TABLE = "players_gw_history"
+        BATCH_SIZE = 500
+
+        total_upserted = 0
+        records_buffer = []
+
+        logger.info("Updating GW history for %d players (season %s)...", len(player_ids), season)
+
+        def _int(v):
+            try:
+                return int(v) if v is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        def _float(v):
+            try:
+                return float(v) if v is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        for player_id in player_ids:
+            url = ELEMENT_SUMMARY_URL.format(player_id=player_id)
+            try:
+                resp = requests.get(url, timeout=20)
+                resp.raise_for_status()
+                history = resp.json().get("history", [])
+            except Exception as exc:
+                logger.warning("Could not fetch element-summary for player %s: %s", player_id, exc)
+                continue
+
+            for row in history:
+                records_buffer.append({
+                    "season": season,
+                    "gameweek": _int(row.get("round")),
+                    "element": _int(row.get("element")),
+                    "name": None,
+                    "position": None,
+                    "team": None,
+                    "total_points": _int(row.get("total_points")),
+                    "minutes": _int(row.get("minutes")),
+                    "goals_scored": _int(row.get("goals_scored")),
+                    "assists": _int(row.get("assists")),
+                    "clean_sheets": _int(row.get("clean_sheets")),
+                    "bonus": _int(row.get("bonus")),
+                    "bps": _int(row.get("bps")),
+                    "influence": _float(row.get("influence")),
+                    "creativity": _float(row.get("creativity")),
+                    "threat": _float(row.get("threat")),
+                    "ict_index": _float(row.get("ict_index")),
+                    "value": _int(row.get("value")),
+                    "selected": _int(row.get("selected")),
+                    "transfers_in": _int(row.get("transfers_in")),
+                    "transfers_out": _int(row.get("transfers_out")),
+                })
+
+            while len(records_buffer) >= BATCH_SIZE:
+                chunk = records_buffer[:BATCH_SIZE]
+                records_buffer = records_buffer[BATCH_SIZE:]
+                try:
+                    self.supabase.table(TABLE).upsert(chunk, on_conflict="season,gameweek,element").execute()
+                    total_upserted += len(chunk)
+                except Exception as exc:
+                    logger.error("GW history batch upsert failed: %s", exc)
+
+        if records_buffer:
+            try:
+                self.supabase.table(TABLE).upsert(records_buffer, on_conflict="season,gameweek,element").execute()
+                total_upserted += len(records_buffer)
+            except Exception as exc:
+                logger.error("GW history final batch upsert failed: %s", exc)
+
+        logger.info("GW history update complete - %d records upserted.", total_upserted)
+        return total_upserted
+
     def update_current_data(self, new_data):
         """Update the current players table with latest data"""
         try:
@@ -300,7 +378,11 @@ class FPLDataUpdater:
             
             # Update current data
             players_updated = self.update_current_data(new_data)
-            
+
+            # Update per-player GW history for the current season
+            player_ids = new_data['id'].astype(int).tolist()
+            gw_records = self.update_gw_history(player_ids, season="2025-26")
+
             # Log success
             self.log_update_complete('success', players_updated, changes_stored)
             
@@ -313,6 +395,7 @@ class FPLDataUpdater:
             print(f"📊 Players updated: {players_updated}")
             print(f"🔄 Changes detected: {changes_stored}")
             print(f"⚽ Current gameweek: {gameweek}")
+            print(f"📈 GW history records upserted: {gw_records}")
             
         except Exception as e:
             error_msg = str(e)
