@@ -10,8 +10,8 @@ with Claude for listing intelligence.
 
 ## Status
 
-- ✅ **Phase 1 — Project scaffold & auth** (this commit)
-- ⬜ Phase 2 — Inspection import & schedule
+- ✅ **Phase 1 — Project scaffold & auth**
+- ✅ **Phase 2 — Inspection import & schedule** (this commit)
 - ⬜ Phase 3 — Listing intelligence (Claude)
 - ⬜ Phase 4 — Photo integrity check (Claude vision)
 - ⬜ Phase 5 — Inspection mode
@@ -32,6 +32,28 @@ with Claude for listing intelligence.
   badges), proving the schema and RLS work end to end.
 - Design system: dark navy + white base, amber accent — see
   `src/theme/colors.ts`.
+
+## Phase 2 — what's built
+
+- **Import `.ics`** calendar invites (REA/Domain open-home invites) via the
+  document picker. The parser (`src/lib/ics.ts`, dependency-free) unfolds RFC
+  5545 lines and extracts address (`LOCATION`), date/time (`DTSTART`) and a
+  listing URL (`URL`, or the first real-estate link in the body).
+- **Import preview** modal lets you deselect events before saving; duplicates
+  (same address + start time) are skipped on import.
+- **Chronological schedule** grouped by day (Today / Tomorrow / weekday),
+  each inspection shown as a card with address, time, listing link and status
+  (upcoming / in progress / done). Long-press a card to remove it.
+- **Clash detection** (`src/lib/clashDetection.ts`): flags overlapping
+  inspections, and tight transitions between back-to-back open homes. When a
+  Google Maps key is configured it uses the **Distance Matrix API** for real
+  drive times; otherwise it falls back to a time-gap heuristic. The travel
+  lookup degrades gracefully (offline / no key / web CORS → heuristic).
+
+> Travel-time clash detection needs `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
+> (Distance Matrix API). Without it the schedule still works using the gap
+> heuristic. Long term this call should move behind an Edge Function so the key
+> isn't shipped in the client.
 
 ### Database (live on Supabase)
 

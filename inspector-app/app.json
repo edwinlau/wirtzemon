@@ -32,7 +32,8 @@
     },
     "extra": {
       "supabaseUrl": "https://myoswzctbxtvsdjakubm.supabase.co",
-      "supabaseAnonKey": "sb_publishable_KAQOX0hYKf9KRj5BXzTeZA_0iuSUUG0"
+      "supabaseAnonKey": "sb_publishable_KAQOX0hYKf9KRj5BXzTeZA_0iuSUUG0",
+      "googleMapsApiKey": ""
     }
   }
 }
