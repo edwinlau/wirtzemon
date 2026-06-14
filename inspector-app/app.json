@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Inspector",
+    "slug": "inspector-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "inspector",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#0B1A2F"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wirtzemon.inspector"
+    },
+    "android": {
+      "package": "com.wirtzemon.inspector",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1A2F"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "supabaseUrl": "https://myoswzctbxtvsdjakubm.supabase.co",
+      "supabaseAnonKey": "sb_publishable_KAQOX0hYKf9KRj5BXzTeZA_0iuSUUG0"
+    }
+  }
+}
